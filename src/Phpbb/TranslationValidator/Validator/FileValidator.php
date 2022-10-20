@@ -14,6 +14,9 @@ use Phpbb\TranslationValidator\Output\OutputInterface;
 
 class FileValidator
 {
+	// Latest version of the English language composer.json
+	const GITHUB_COMPOSER_JSON_SOURCE = 'https://raw.githubusercontent.com/phpbb/phpbb/master/phpBB/language/en/composer.json';
+
 	/** @var string */
 	protected $direction;
 	/** @var string */
@@ -237,6 +240,16 @@ class FileValidator
 	public function validate($sourceFile, $originFile)
 	{
 		$this->validateLineEndings($originFile);
+
+		// phpBB 4.0 specific checks
+		if ($this->phpbbVersion == '4.0')
+		{
+			if ($originFile == $this->originLanguagePath . 'composer.json')
+			{
+				$this->validateComposerJson($originFile);
+			}
+		}
+
 		if (substr($originFile, -4) === '.php')
 		{
 			$this->validateDefinedInPhpbb($originFile);
@@ -378,6 +391,51 @@ class FileValidator
 		if ($originFile === $this->originLanguagePath . 'captcha_recaptcha.php')
 		{
 			$this->validateReCaptchaValue($originFile, $validate);
+		}
+	}
+
+	/**
+	 * For v4.0 only, validate the language composer.json file
+	 * @param $originFile
+	 */
+	public function validateComposerJson($originFile)
+	{
+		// Get the most up to date version of the JSON schema online
+		$sourceComposerJson = json_decode(file_get_contents(self::GITHUB_COMPOSER_JSON_SOURCE), true);
+
+		// User composer file
+		$userComposerJson = json_decode(file_get_contents($this->originPath . '/' . $originFile), true);
+
+		if (array_key_exists('extra', $userComposerJson))
+		{
+			// Intersecting the arrays gives us the common/shared keys. So if they are identical, the number of results should
+			// match the number of keys in the source file.
+			if (count(array_intersect_key($userComposerJson['extra'], $sourceComposerJson['extra'])) != count(array_keys($sourceComposerJson['extra'])))
+			{
+				// Missing extra sub-values
+				$this->output->addMessage(Output::ERROR, 'composer.json must contain information under the "extra" key which is currently missing.', $originFile);
+			}
+
+			else
+			{
+				// Keys are present, check the version matches
+				$phpbbVersionMatches = $sourceComposerJson['extra']['phpbb-version'] == $userComposerJson['extra']['phpbb-version'];
+
+				// Check that 'version' and 'phpbb-version' are matching as well
+				$languageVersionMatches = isset($userComposerJson['version']) && $userComposerJson['version'] == $sourceComposerJson['extra']['phpbb-version'];
+
+				if (!$phpbbVersionMatches || !$languageVersionMatches)
+				{
+					// Version mismatch
+					$this->output->addMessage(Output::ERROR, sprintf('composer.json contains a version mismatch. (should be %s)', $sourceComposerJson['extra']['phpbb-version']), $originFile);
+				}
+			}
+		}
+
+		else
+		{
+			// Extra key required
+			$this->output->addMessage(Output::ERROR, 'composer.json must contain an "extra" key with the language information.', $originFile);
 		}
 	}
 
